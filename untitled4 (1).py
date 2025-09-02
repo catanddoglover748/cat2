@@ -191,9 +191,7 @@ def get_us_actuals_from_sec(ticker: str) -> dict:
 
     if rev is None and eps is None:
         raise RuntimeError(f"SEC XBRL facts not found for {ticker}")
-st.write("Available GAAP keys:", list(facts.get("facts", {}).keys())[:30])
-st.write("Revenue related keys:", [k for k in facts.get("facts", {}).keys() if "Revenue" in k or "Sales" in k])
-st.write("EPS related keys:", [k for k in facts.get("facts", {}).keys() if "EarningsPerShare" in k])
+
     # period 情報（どちらか取れたほう）
     meta = meta_e or meta_r or {}
     period = {
