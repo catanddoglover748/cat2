@@ -17,10 +17,7 @@ from datetime import datetime, timedelta
 # 2. Finnhub APIクライアントの初期化（インポートのすぐ下）
 # =============================
 st.set_page_config(layout="wide")
-api_key = st.secrets["MY_API_KEY"]
-api_key = st.secrets.get("MY_API_KEY") or os.getenv("MY_API_KEY")
-if not api_key:
-    st.stop() 
+api_key = st.secrets["FINNHUB_API_KEY"]
 finnhub_client = finnhub.Client(api_key=api_key)
 # ============ PATCH-A: SEC実績取り込み（米国）ユーティリティ ============
 import requests, time, math
