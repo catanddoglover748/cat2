@@ -668,16 +668,6 @@ except Exception as e:
         st.warning("⚠️ 決算データの取得でエラーが発生しました。")   
 # ===27. ⏬ 決算データ  デバッグ用：SECの生データを確認するための関数　終了============================================================================================================
 
-
- # ===PATCH:A ===============================================    
-
-
-  # ===PATCH:B 収益・EPS 候補を実際に探す===============================================      
-    rev, mr = _first_val(facts, GAAP_REVENUE_KEYS)
-    print("Revenue:", rev, "meta:", mr)
-
-    eps, me = _first_val(facts, [GAAP_EPS_DILUTED, "ifrs-full:DilutedEarningsLossPerShare"])
-    print("EPS:", eps, "meta:", me)
 # ===28.実績取得get_us_actuals_from_sec============================================================================================================
  # ===PATCH:A ===============================================  
 def get_us_actuals_from_sec(ticker: str) -> dict:
@@ -717,7 +707,7 @@ def get_us_actuals_from_sec(ticker: str) -> dict:
     
 # ===28.実績取得get_us_actuals_from_sec　終了============================================================================================================
 
-# ===29.? 実績（Actual）は SEC から ==========================
+# ===29. 実績（Actual）は SEC から ==========================
  # ===PATCH:A ===============================================  
 eps_actual = 0.0
 rev_actual_B = 0.0
@@ -732,7 +722,7 @@ try:
     st.caption(f"Source: {actual['source']}  {actual['period']}")
 except Exception as e:
     st.warning(f"SEC実績の取得に失敗: {e}")
-# ===29.?　終了=========================================================
+# ===29. 実績（Actual）は SEC から終了=========================================================
 
 # ===30. 予想EPS　Estimates layer (EPS/Revenue; keep separate) ===============================================================
  # ===PATCH:A ===============================================  
@@ -752,38 +742,60 @@ except Exception as e:
 # もし Revenue 予想を別APIで入れる場合はここで rev_est_B に代入
 # 例: rev_est_B = <analyst revenue estimate in USD billions>
 
-# ===30. Estimates layer (EPS/Revenue; keep separate) 　終了===============================================================
+# ===30. 予想EPS　Estimates layer (EPS/Revenue; keep separate) 　終了===============================================================
 
-# ===32.差分の計算とUI =====================================
+# ===32.差分の計算とUI（collect_earnings_block非依存・ローカル計算）=====================================
  # ===PATCH:A ===============================================  
-block = collect_earnings_block(ticker)
 
-eps_act = block["eps_actual"]
-rev_act_usd = block["rev_actual_usd"]
-eps_est = block["eps_est"]
-rev_est_usd = block["rev_est_usd"]
- # ===PATCH:B ===============================================  
-def safe_pct(numer, denom):
+
+ # ===PATCH:B 実績（#29 で SEC から取得済み：eps_actual, rev_actual_B, actual['period']）=============================================== 
+act_eps = eps_actual if 'eps_actual' in locals() else None
+act_rev_B = rev_actual_B if 'rev_actual_B' in locals() else None  # 既にB単位
+
+ # ===PATCH:C 予想（#30 で取得済み：eps_est_val, rev_est_B(任意)）===============================================
+est_eps = eps_est_val if 'eps_est_val' in locals() else None
+est_rev_B = rev_est_B if 'rev_est_B' in locals() else None  # 予想がなければ None
+
+ # ===PATCH:D 期一致チェック（±35日ゆる判定）=============================================== 
+def _midpoint(dstr):
+    # "YYYY-MM-DD" → datetime
     try:
-        if denom not in (None, 0, 0.0) and numer is not None:
-            return round((float(numer) - float(denom)) / float(denom) * 100, 2)
-    except Exception:
-        pass
-    return None
- # ===PATCH:C 同期の場合だけ差分を表示===============================================   
-eps_diff = safe_pct(eps_act, eps_est) if block["same_period_ok"] else None
-rev_diff = safe_pct(rev_act_usd, rev_est_usd) if (block["same_period_ok"] and rev_est_usd is not None) else None
- # ===PATCH:D ===============================================  
-st.metric("EPS (Actual)", f"{eps_act:.2f}" if eps_act is not None else "N/A",
-          f"{eps_diff:+.2f}%" if eps_diff is not None else None)
+        return datetime.strptime(dstr, "%Y-%m-%d")
+    except:
+        return None
 
-if rev_act_usd is not None:
-    st.metric("Revenue (Actual, B)", f"{rev_act_usd/1e9:.2f}B",
-              f"{rev_diff:+.2f}%" if rev_diff is not None else None)
+ # ===PATCH:E SECのperiodから期末日を参照（end優先 / filedは参考）=============================================== 
+act_end = None
+if 'actual' in locals():
+    pdict = actual.get("period", {}) or {}
+    act_end = _midpoint(pdict.get("end"))
+
+# Finnhubの最新earningsから期末日が取れない場合が多いので、
+# ここでは「実績が存在するなら same_period_ok=True」とし、
+# 将来的に予想側の期情報が取れるようになったら比較に切替
+same_period_ok = True if act_end else True  # 期情報がない場合は寛容にTrue
+
+ # ===PATCH:F   差分計算（期一致が前提）===============================================
+eps_diff_pct = safe_pct(act_eps, est_eps) if (same_period_ok and act_eps is not None and est_eps is not None) else None
+rev_diff_pct = safe_pct(act_rev_B, est_rev_B) if (same_period_ok and isinstance(act_rev_B,(int,float)) and isinstance(est_rev_B,(int,float))) else None
+
+ # ===PATCH:G  メトリクス表示　=============================================== 
+st.metric("EPS (Actual)", f"{act_eps:.2f}" if isinstance(act_eps,(int,float)) else "N/A",
+          f"{eps_diff_pct:+.2f}%" if isinstance(eps_diff_pct,(int,float)) else None)
+
+if isinstance(act_rev_B,(int,float)):
+    st.metric("Revenue (Actual, B)", f"{act_rev_B:.2f}B",
+              f"{rev_diff_pct:+.2f}%" if isinstance(rev_diff_pct,(int,float)) else None)
 else:
     st.metric("Revenue (Actual, B)", "N/A")
+    
+ # ===PATCH:H　ソース/注意書き　=============================================== 
+if 'actual' in locals():
+    st.caption(f"Source: {actual.get('source')} {actual.get('period')}")
+if not same_period_ok:
+    st.caption("⚠️ 実績と予想の参照期が一致していない可能性があります（差分は参考値）。")
 
- # ===PATCH:E  ソース/警告のラベル（お好みで）=============================================== 
+ # ===PATCH:I  ソース/警告のラベル（お好みで）=============================================== 
 if block["sources"]:
     st.caption("Source: " + " → ".join(block["sources"]))
 for w in block["warnings"][:2]:
