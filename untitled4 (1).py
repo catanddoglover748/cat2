@@ -41,18 +41,38 @@ def check_password():
 check_password()
 
 # --- ③ 以降がアプリ本体（認証後のみ表示・動作） ---
+# --- ③ 以降がアプリ本体（認証後のみ表示・動作） ---
 st.title("🔒 自分専用ダッシュボード")
-st.write("📊 株価チャートビューア（TradingView風）/#### ⭐ 銘柄（ティッカー）/### ティッカー選択/<div class="tenet-h1"> 決算概要</div>
-""""""/
+
+st.markdown("""
+📊 株価チャートビューア（TradingView風）
+
+#### ⭐ 銘柄（ティッカー）
+### ティッカー選択
+
+<div class="tenet-h1">決算概要</div>
+
 <div class="section-title">AI Rating:</div>
 <div class="card" style="display:flex; align-items:center; gap:10px; justify-content:flex-start;">
   <div>📊</div><div class="muted">Coming soon</div>
 </div>
+
 <p class="muted" style="margin-top:.4rem;">
-  <em>*Earnings report released on 2025-08-27. Informational purposes only. Consult with a professional and conduct sufficient research before making investment decisions.*</em>
+  <em>*Earnings report released on 2025-08-27. Informational purposes only. 
+  Consult with a professional and conduct sufficient research before making investment decisions.*</em>
 </p>
 </div>  <!-- 最初の .card を閉じる -->
-"""/### 🧠 決算まとめるくん (β)/#### 重要指標（抽出）/#### 決算内容の注目ポイント（自動生成）/### 🤖 AI Rating: 📈/f"**{company_safe}  ${ticker}  決算サマリー**"")
+
+### 🧠 決算まとめるくん (β)
+#### 重要指標（抽出）
+#### 決算内容の注目ポイント（自動生成）
+
+### 🤖 AI Rating: 📈
+""", unsafe_allow_html=True)
+
+# Python変数を埋め込むときは f-string を使う
+st.markdown(f"**{company_safe}  ${ticker}  決算サマリー**")
+
 # ===3.簡易パスワード認証　終了===================================================================================
 # ===  4.SEC 設定とヘルパー　throttle & helper =====================================================================================================
 
