@@ -16,14 +16,35 @@ from datetime import datetime, timedelta
 
 # ===1. ライブラリ：必要なライブラリのインポート（ファイルの先頭）　終了===================================================================================
 
-# ===2. ライブラリ：Finnhub APIクライアントの初期化（インポートのすぐ下）
+# ===2. ライブラリ：Finnhub APIクライアントの初期化（インポートのすぐ下）===================================================================================
 
 st.set_page_config(layout="wide")
 api_key = st.secrets["FINNHUB_API_KEY"]
 finnhub_client = finnhub.Client(api_key=api_key)
-# ===2. ライブラリ：Finnhub APIクライアントの初期化（インポートのすぐ下）終了
+# ===2. ライブラリ：Finnhub APIクライアントの初期化（インポートのすぐ下）終了===================================================================================
 
+# ===3.簡易パスワード認証===================================================================================
+def check_password():
+    def password_entered():
+        if st.session_state["password"] == st.secrets["APP_PASSWORD"]:
+            st.session_state["password_correct"] = True
+        else:
+            st.session_state["password_correct"] = False
 
+    if "password_correct" not in st.session_state:
+        st.text_input("Password:", type="password", on_change=password_entered, key="password")
+        return False
+    elif not st.session_state["password_correct"]:
+        st.text_input("Password:", type="password", on_change=password_entered, key="password")
+        st.error("パスワードが違います。")
+        return False
+    else:
+        return True
+
+if check_password():
+    st.title("アプリ本体")
+    st.write("ここにメインアプリを置く")
+# ===3.簡易パスワード認証　終了===================================================================================
 # ===  4.SEC 設定とヘルパー　throttle & helper =====================================================================================================
 
 
