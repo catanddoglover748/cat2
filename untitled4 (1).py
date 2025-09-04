@@ -8,6 +8,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 import pandas as pd
 import re
+from functools import lru_cache
 
 import traceback
 
@@ -58,7 +59,7 @@ def sec_get(url, **kw):
     
 # ===  4.SEC 設定とヘルパー　 throttle & helper　終了 ===================================================================================================
 
-# ===  5.キャッシュ（Streamlit 環境ならこちらを推奨）==================================================================================================
+# ===  5.キャッシュ データを一時保存（SECは長め）。Streamlitが無い時はlru_cacheに自動切替==================================================================================================
 
 try:
     # Streamlit があるなら 30日キャッシュ。無ければ lru_cache が使われます
@@ -70,7 +71,7 @@ except Exception:
         def deco(fn):
             return lru_cache(maxsize=64)(fn)
         return deco
-# ===  5.キャッシュ（Streamlit 環境ならこちらを推奨）終了==================================================================================================
+# ===  5.キャッシュ データを一時保存（SECは長め）。Streamlitが無い時はlru_cacheに自動切替終了==================================================================================================
 
 # ===  6.CIK 解決　 ティッカー（AAPLなど）からSEC用のCIKコードを探す ==================================================================================================
 
@@ -195,17 +196,18 @@ def _first_val(facts: dict, keys: list[str]) -> tuple[float|None, dict|None]:
 
 # ===  11.facts探索ユーティリティ　　=======================================================================================
 def _try_compute_eps_diluted(facts: dict) -> tuple[float|None, dict|None]:
-    """ EPS Diluted が無いとき NetIncome / WeightedAverageDilutedShares で再計算 """
     net, meta_net = _first_val(facts, [GAAP_NET_INCOME])
-    wad, meta_sh = _first_val(facts, [GAAP_WAD_SHARES])
-    if net is None or not wad:
+    wad, meta_sh  = _first_val(facts, [GAAP_WAD_SHARES])
+    if net is None or wad is None:
         return None, None
-    if wd := float(wad):
-        try:
-            return float(net) / float(wd), meta_net
-        except Exception:
-            return None, None
-    return None, None
+    wd = _to_float(wad)
+    if wd is None or wd == 0:
+        return None, None
+    try:
+        return float(net) / float(wd), meta_net
+    except Exception:
+        return None, None
+
 # ===  11.facts探索ユーティリティ　終了=======================================================================================
 
 # === 13. ページタイトル============================================================================================================ 
@@ -572,7 +574,7 @@ try:
                 return round((float(numer) - float(denom)) / float(denom) * 100, 2)
         except Exception:
             pass
-        return 0.0
+        return None 
  # ===PATCH:C ===============================================
     
     def to_billions(v):
@@ -668,7 +670,7 @@ except Exception as e:
         st.warning("⚠️ 決算データの取得でエラーが発生しました。")   
 # ===27. ⏬ 決算データ  デバッグ用：SECの生データを確認するための関数　終了============================================================================================================
 
-# ===28.実績取得get_us_actuals_from_sec============================================================================================================
+# ===28.実績（SEC）：XBRLから売上とEPSを取り、四半期の情報も返す============================================================================================================
  # ===PATCH:A ===============================================  
 def get_us_actuals_from_sec(ticker: str) -> dict:
     cik   = resolve_cik(ticker)
@@ -705,7 +707,7 @@ def get_us_actuals_from_sec(ticker: str) -> dict:
         "source": "SEC XBRL",
     }
     
-# ===28.実績取得get_us_actuals_from_sec　終了============================================================================================================
+# ===28.実績（SEC）：XBRLから売上とEPSを取り、四半期の情報も返す　終了============================================================================================================
 
 # ===29. 実績（Actual）は SEC から ==========================
  # ===PATCH:A ===============================================  
@@ -769,11 +771,22 @@ act_end = None
 if 'actual' in locals():
     pdict = actual.get("period", {}) or {}
     act_end = _midpoint(pdict.get("end"))
+est_end = None
+try:
+    # Finnhub latest earnings の period は "YYYY-MM-DD" 形式が入ることが多い
+    if isinstance(earnings_list, list) and earnings_list:
+        p = earnings_list[0].get("period")
+        est_end = _midpoint(p) if p else None
+except:
+    pass
 
 # Finnhubの最新earningsから期末日が取れない場合が多いので、
 # ここでは「実績が存在するなら same_period_ok=True」とし、
 # 将来的に予想側の期情報が取れるようになったら比較に切替
-same_period_ok = True if act_end else True  # 期情報がない場合は寛容にTrue
+same_period_ok = True
+if act_end and est_end:
+    delta_days = abs((act_end - est_end).days)
+    same_period_ok = (delta_days <= 35)
 
  # ===PATCH:F   差分計算（期一致が前提）===============================================
 eps_diff_pct = safe_pct(act_eps, est_eps) if (same_period_ok and act_eps is not None and est_eps is not None) else None
@@ -793,14 +806,6 @@ else:
 if 'actual' in locals():
     st.caption(f"Source: {actual.get('source')} {actual.get('period')}")
 if not same_period_ok:
-    st.caption("⚠️ 実績と予想の参照期が一致していない可能性があります（差分は参考値）。")
-
- # ===PATCH:I  ソース/警告のラベル（お好みで）=============================================== 
-if block["sources"]:
-    st.caption("Source: " + " → ".join(block["sources"]))
-for w in block["warnings"][:2]:
-    st.caption(f"⚠️ {w}")
-if not block["same_period_ok"]:
     st.caption("⚠️ 実績と予想の参照期が一致していない可能性があります（差分は参考値）。")
 
 # ===32.差分の計算とUI 終了=====================================
