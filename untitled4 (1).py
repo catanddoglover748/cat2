@@ -24,26 +24,35 @@ finnhub_client = finnhub.Client(api_key=api_key)
 # ===2. ライブラリ：Finnhub APIクライアントの初期化（インポートのすぐ下）終了===================================================================================
 
 # ===3.簡易パスワード認証===================================================================================
+# --- ① パスワード判定関数（セッションで一度だけ） ---
 def check_password():
-    def password_entered():
-        if st.session_state["password"] == st.secrets["APP_PASSWORD"]:
-            st.session_state["password_correct"] = True
-        else:
-            st.session_state["password_correct"] = False
-
-    if "password_correct" not in st.session_state:
-        st.text_input("Password:", type="password", on_change=password_entered, key="password")
-        return False
-    elif not st.session_state["password_correct"]:
-        st.text_input("Password:", type="password", on_change=password_entered, key="password")
+    def _entered():
+        st.session_state["ok"] = (st.session_state.get("pw") == st.secrets["APP_PASSWORD"])
+    if "ok" not in st.session_state:
+        st.text_input("Password", type="password", key="pw", on_change=_entered)
+        st.stop()  # 入力されるまでここで停止（中身は見せない）
+    if not st.session_state["ok"]:
+        st.text_input("Password", type="password", key="pw", on_change=_entered)
         st.error("パスワードが違います。")
-        return False
-    else:
-        return True
+        st.stop()  # 正しくなるまで停止
+    # ここに来たら認証成功（同セッション中は再入力不要）
 
-if check_password():
-    st.title("アプリ本体")
-    st.write("ここにメインアプリを置く")
+# --- ② ここでページ全体をガード ---
+check_password()
+
+# --- ③ 以降がアプリ本体（認証後のみ表示・動作） ---
+st.title("🔒 自分専用ダッシュボード")
+st.write("📊 株価チャートビューア（TradingView風）/#### ⭐ 銘柄（ティッカー）/### ティッカー選択/<div class="tenet-h1"> 決算概要</div>
+""""""/
+<div class="section-title">AI Rating:</div>
+<div class="card" style="display:flex; align-items:center; gap:10px; justify-content:flex-start;">
+  <div>📊</div><div class="muted">Coming soon</div>
+</div>
+<p class="muted" style="margin-top:.4rem;">
+  <em>*Earnings report released on 2025-08-27. Informational purposes only. Consult with a professional and conduct sufficient research before making investment decisions.*</em>
+</p>
+</div>  <!-- 最初の .card を閉じる -->
+"""/### 🧠 決算まとめるくん (β)/#### 重要指標（抽出）/#### 決算内容の注目ポイント（自動生成）/### 🤖 AI Rating: 📈/f"**{company_safe}  ${ticker}  決算サマリー**"")
 # ===3.簡易パスワード認証　終了===================================================================================
 # ===  4.SEC 設定とヘルパー　throttle & helper =====================================================================================================
 
