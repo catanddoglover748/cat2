@@ -1,6 +1,6 @@
-# =============================
-# 1. 必要なライブラリのインポート（ファイルの先頭）
-# =============================
+
+# ============ 1. 必要なライブラリのインポート（ファイルの先頭） =======================================================================
+
 import streamlit as st
 import yfinance as yf
 import finnhub
@@ -13,13 +13,17 @@ import traceback
 
 from datetime import datetime, timedelta
 
-# =============================
+# ===1. 必要なライブラリのインポート（ファイルの先頭）　終了===================================================================================
+
 # 2. Finnhub APIクライアントの初期化（インポートのすぐ下）
-# =============================
+
 st.set_page_config(layout="wide")
 api_key = st.secrets["FINNHUB_API_KEY"]
 finnhub_client = finnhub.Client(api_key=api_key)
-# ============ PATCH-A: SEC実績取り込み（米国）ユーティリティ ============
+# 2. Finnhub APIクライアントの初期化（インポートのすぐ下）終了
+
+# ============ 3. SEC実績取り込み（米国）ユーティリティ ==============================================================================================================
+
 import requests, time, math
 from functools import lru_cache
 
@@ -32,7 +36,13 @@ SEC_HEADERS = {
     "User-Agent": f"{APP}/1.0 ({MAIL})",
     "Accept-Encoding": "gzip, deflate",
 }
-# === SEC throttle & helper ===
+# ============ 3.SEC実績取り込み（米国）ユーティリティ　終了 ==============================================================================================================
+
+
+
+# ===  4.SEC throttle & helper =====================================================================================================
+
+
 import time, requests
 
 APP  = st.secrets.get("SEC_APP_NAME", "StockEarningsDash")
@@ -62,11 +72,11 @@ def sec_get(url, **kw):
         backoff *= 2
     r.raise_for_status()
     return r
+    
+# ===  4.SEC throttle & helper　終了 ===================================================================================================
 
-# =============================
+# ===  5.キャッシュ（Streamlit 環境ならこちらを推奨）==================================================================================================
 
-
-# ---- キャッシュ（Streamlit 環境ならこちらを推奨）----
 try:
     # Streamlit があるなら 30日キャッシュ。無ければ lru_cache が使われます
     from streamlit.runtime.caching import cache_data as _cache_data
@@ -77,30 +87,61 @@ except Exception:
         def deco(fn):
             return lru_cache(maxsize=64)(fn)
         return deco
+# ===  5.キャッシュ（Streamlit 環境ならこちらを推奨）終了==================================================================================================
 
-# ---- 1) ティッカー -> CIK 解決 ----
+# ===  6.ティッカー -> CIK 解決 ==================================================================================================
+
 @cache_days(30)
 def resolve_cik(ticker: str) -> str:
-    t = (ticker or "").upper().strip()
-    url = "https://www.sec.gov/files/company_tickers.json"
-    r = requests.get(url, headers=SEC_HEADERS, timeout=20)
-    r = sec_get(url)
-    #r.raise_for_status()
-    data = r.json()  # { "0": {"ticker":"AAPL","cik_str":320193,"title":"Apple Inc."}, ... }
-    for _, row in data.items():
-        if row.get("ticker", "").upper() == t:
-            return f"{int(row['cik_str']):010d}"
-    raise ValueError(f"CIK not found for ticker={ticker}")
+    """SECの company_tickers.json は BRK.B 形式。yfinance は BRK-B。
+    - と . の揺れ、類似コード（GOOG/GOOGL 等）も緩く吸収して CIK 解決。
+    """
+    t_raw = (ticker or "").upper().strip()
+    if not t_raw:
+        raise ValueError("empty ticker")
 
-# ---- 2) 会社ファクト（XBRL facts）を取得 ----
+    candidates = [
+        t_raw,
+        t_raw.replace("-", "."),
+    ]
+    if "." in t_raw:
+        candidates.append(t_raw.replace(".", "-"))
+
+    url = "https://www.sec.gov/files/company_tickers.json"
+    r = sec_get(url)
+    data = r.json()
+
+    by_ticker = {
+        row.get("ticker","").upper(): int(row["cik_str"])
+        for row in data.values()
+        if isinstance(row, dict) and "ticker" in row and "cik_str" in row
+    }
+
+    # 直接一致
+    for c in candidates:
+        if c in by_ticker:
+            return f"{by_ticker[c]:010d}"
+
+    # 緩一致（記号除去）
+    def norm(s): return s.replace(".","").replace("-","")
+    for c in candidates:
+        for k in by_ticker.keys():
+            if norm(k) == norm(c):
+                return f"{by_ticker[k]:010d}"
+
+    raise ValueError(f"CIK not found for ticker={ticker} (tried {candidates})")
+# === 6.ティッカー -> CIK 解決 終了==================================================================================================
+
+# === 7.会社ファクト（XBRL facts）を取得  ==================================================================================================
 @cache_days(30)
 def sec_company_facts(cik: str) -> dict:
     url = f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json"
-    r = requests.get(url, headers=SEC_HEADERS, timeout=30)
+    #r = requests.get(url, headers=SEC_HEADERS, timeout=30)
     r = sec_get(url)
     return r.json()
+# ===  7.会社ファクト（XBRL facts）を取得  終了==================================================================================================
 
-# ---- 3) 候補キーから fact を抽出（最新の四半期/年次を優先）----
+# ===  8.候補キーから fact を抽出（最新の四半期/年次を優先）=======================================================================================
 GAAP_REVENUE_KEYS = [
     "us-gaap:SalesRevenueNet",
     "us-gaap:Revenues",
@@ -109,47 +150,56 @@ GAAP_REVENUE_KEYS = [
 GAAP_EPS_DILUTED = "us-gaap:EarningsPerShareDiluted"
 GAAP_NET_INCOME   = "us-gaap:NetIncomeLoss"
 GAAP_WAD_SHARES   = "us-gaap:WeightedAverageNumberOfDilutedSharesOutstanding"
+# ===  8.候補キーから fact を抽出（最新の四半期/年次を優先）終了=======================================================================================
 
+# ===  9.　？　=======================================================================================
 def _pick_latest_quarter(values: list) -> dict | None:
-    """
-    companyfacts の各 units[USD] の values（list of dict）から
-    四半期・年次を含む最新（formが10-Q/10-K）を返す
-    """
     if not values:
         return None
-    # 10-Q/10-Kを優先、filed（提出日）で降順
+    # 10-Q / 10-K を優先しつつ filed（提出日）で新しいもの
     def _key(v):
-        return (0 if v.get("form") in ("10-Q", "10-K") else 1, v.get("filed",""))
-    vals = sorted(values, key=_key)
-    # もっとも「10-Q/10-K かつ filed 最新」に近いものからスキャン（末尾の方が新しい）
+        return (0 if v.get("form") in ("10-Q", "10-K") else 1, v.get("filed", ""))
+    vals = sorted(values, key=_key)  # 昇順 → 後ろが新しい
     for v in reversed(vals):
         if v.get("form") in ("10-Q", "10-K"):
             return v
-    # 無ければ最後の要素
     return values[-1]
+# ===  9.　？　終了　=======================================================================================
+
+# ===  10.　？　=======================================================================================
 
 def _first_val(facts: dict, keys: list[str]) -> tuple[float|None, dict|None]:
     """
-    XBRL facts から keys の順で USD 値を探す。 (value, meta) を返す
+    XBRL facts から keys（"us-gaap:Revenues" など）の順に USD 値を探索して
+    (value, meta) を返す。facts は companyfacts の JSON 全体。
     """
-    if not facts: 
+    root = facts.get("facts", {})
+    if not root:
         return None, None
+
     for key in keys:
-        f = facts.get("facts", {}).get(key)
-        if not f:
-            continue
-        units = f.get("units", {})
-        usd = None
-        # 典型: "USD", "USD/shares"
+        if ":" in key:
+            ns, concept = key.split(":", 1)
+        else:
+            ns, concept = "us-gaap", key
+        # 期待構造: facts["facts"]["us-gaap"]["Revenues"]["units"]["USD"] = [...]
+        try:
+            units = root.get(ns, {}).get(concept, {}).get("units", {})
+        except Exception:
+            units = {}
+
+        usd_list = None
         for ukey in ("USD", "USD/shares", "USD/share"):
             if ukey in units:
-                usd = units[ukey]
+                usd_list = units[ukey]
                 break
-        if not usd:
+        if not usd_list:
             continue
-        v = _pick_latest_quarter(usd)
-        if v is None: 
+
+        v = _pick_latest_quarter(usd_list)
+        if not v:
             continue
+
         val = v.get("val")
         if val is None:
             continue
@@ -158,7 +208,9 @@ def _first_val(facts: dict, keys: list[str]) -> tuple[float|None, dict|None]:
         except Exception:
             continue
     return None, None
+# ===  10.　？　終了　=======================================================================================
 
+# ===  11.　？　　=======================================================================================
 def _try_compute_eps_diluted(facts: dict) -> tuple[float|None, dict|None]:
     """ EPS Diluted が無いとき NetIncome / WeightedAverageDilutedShares で再計算 """
     net, meta_net = _first_val(facts, [GAAP_NET_INCOME])
@@ -171,7 +223,9 @@ def _try_compute_eps_diluted(facts: dict) -> tuple[float|None, dict|None]:
         except Exception:
             return None, None
     return None, None
+# ===  11.　？　　終了=======================================================================================
 
+# ===  12.　？　　=======================================================================================
 def get_us_actuals_from_sec(ticker: str) -> dict:
     """
     返り値:
@@ -207,24 +261,18 @@ def get_us_actuals_from_sec(ticker: str) -> dict:
         "period": period,
         "source": "SEC XBRL",
     }
-# ============ /PATCH-A =========================================================
 
-# ============================================================================================================ 
-# ----------------------------
-# 📌 1. ページタイトル
-# ----------------------------
+# ===  12.？　　終了=======================================================================================
+
+# === 13. ページタイトル============================================================================================================ 
+
 #st.title("📊 株価チャートビューア（TradingView風）")
-# 📌 1. ページタイトル
 st.markdown('<div class="tenet-h1"> 株価チャートビューア <span>(TradingView風)</span></div>', unsafe_allow_html=True)
 
-# ----------------------------
-# 📌 2. ティッカーとセッション管理
-# ----------------------------
-# =========================
-# 2. ティッカーとセッション管理（PATCH2/3 一式）
-# =========================
+# === 13. ページタイトル終了========================================================================================
 
-# --- バリデーション：ティッカーを大文字・英数/ドット/ハイフンに正規化 ---
+# === 14. ティッカーとセッション管理 バリデーション：ティッカーを大文字・英数/ドット/ハイフンに正規化 ======================================
+
 def _normalize_ticker(t: str) -> str:
     if not t:
         return ""
@@ -244,8 +292,11 @@ if "watchlists" not in st.session_state:
 # ---- S&P500 / NASDAQ-100 を自動ロードしてウォッチリストに追加 ----
 import pandas as pd
 import re
+# === 14.ティッカーとセッション管理 バリデーション：ティッカーを大文字・英数/ドット/ハイフンに正規化 終了 ======================================
 
-@st.cache_data(ttl=2_592_000)  # 約30日キャッシュ
+# === 15.約30日キャッシュ　==================================================================================================================
+ # ===PATCH:A ===============================================  
+@st.cache_data(ttl=2_592_000)  
 def load_sp500_symbols() -> list[str]:
     """WikipediaからS&P500構成銘柄を取得して正規化"""
     url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
@@ -277,7 +328,7 @@ def load_sp500_symbols() -> list[str]:
     pat = re.compile(r"^[A-Z0-9\.\-]{1,10}$")
     tickers = [t for t in tickers if pat.match(t)]
     return sorted(set(tickers))
-
+ # ===PATCH:B ===============================================  
 @st.cache_data(ttl=2_592_000)  # 約30日キャッシュ
 def load_nasdaq100_symbols() -> list[str]:
     """WikipediaからNASDAQ100構成銘柄を取得して正規化"""
@@ -305,8 +356,9 @@ def load_nasdaq100_symbols() -> list[str]:
     )
     pat = re.compile(r"^[A-Z0-9\-]{1,10}$")
     return sorted({t for t in tickers if pat.match(t)})
+# === 15.約30日キャッシュ　終了==================================================================================================================
 
-# 実行：取得できたものだけウォッチリストに追加（失敗時は静かにスキップ）
+# === 16.実行：取得できたものだけウォッチリストに追加（失敗時は静かにスキップ）===================================================================
 try:
     sp500_list = load_sp500_symbols()
     if sp500_list:
@@ -320,17 +372,16 @@ try:
         st.session_state.watchlists["NASDAQ-100"] = ndx_list
 except Exception as e:
     st.caption("⚠️ NASDAQ-100 リストの自動取得に失敗しました（後で再試行できます）。")
-# ----------------------------------------------------------------------
+
 
 if "active_watchlist" not in st.session_state:
     st.session_state.active_watchlist = "My Favorites"
 
 if "selected_ticker" not in st.session_state:
     st.session_state.selected_ticker = st.session_state.watchlists[st.session_state.active_watchlist][0]
+# === 16.実行：取得できたものだけウォッチリストに追加（失敗時は静かにスキップ）終了===================================================================
 
-# -------------------------------
-# 2) ウォッチリスト選択/新規作成/削除   ← PATCH2
-# -------------------------------
+# === 17. ウォッチリスト選択/新規作成/削除 ===================================================================
 st.markdown("#### 📁 ウォッチリスト")
 
 c1, c2, c3 = st.columns([2, 2, 1])
@@ -361,14 +412,16 @@ with c3:
             del st.session_state.watchlists[name]
             # 適当な残っているリストへ切替
             st.session_state.active_watchlist = list(st.session_state.watchlists.keys())[0]
+# === 17. ウォッチリスト選択/新規作成/削除 終了  =========================================================================================
 
-# 現在のリスト
+# === 18.現在のリスト =========================================================================================
+
 curr_list_name = st.session_state.active_watchlist
 ticker_list = st.session_state.watchlists[curr_list_name]
+# === 18.現在のリスト 終了 =========================================================================================
 
-# -------------------------------
-# 3) 銘柄の追加/重複排除
-# -------------------------------
+# ===19. 銘柄の追加/重複排除 =========================================================================================
+
 st.markdown("#### ⭐ 銘柄（ティッカー）")
 
 cc1, cc2 = st.columns([3, 1])
@@ -385,10 +438,10 @@ with cc2:
         else:
             ticker_list.append(t)
             st.session_state.watchlists[curr_list_name] = ticker_list
+# ===19. 銘柄の追加/重複排除 =========================================================================================
 
-# -------------------------------
-# 4) ウォッチリストの表示（TradingView風ボタン ＋ ✖削除） ← PATCH3
-# -------------------------------
+# ===20. ウォッチリストの表示（TradingView風ボタン ＋ ✖削除）===========================================================
+
 if ticker_list:
     rows = (len(ticker_list) + 5) // 6   # ボタンを6列グリッドに
     for r in range(rows):
@@ -412,19 +465,19 @@ if ticker_list:
                         del st.session_state["selected_ticker"]
 else:
     st.info("このリストにはまだ銘柄がありません。上の入力から追加してください。")
+# ===20. ウォッチリストの表示（TradingView風ボタン ＋ ✖削除）終了 ===========================================================
 
-# -------------------------------
+# ===21. リストが空で selected_ticker がない場合の保険 ===========================================================
+
 # 5) 選択中ティッカーを確定（以降のセクションと連動）
-# -------------------------------
-# リストが空で selected_ticker がない場合の保険
+
 if ticker_list and "selected_ticker" not in st.session_state:
     st.session_state.selected_ticker = ticker_list[0]
 
 ticker = st.session_state.selected_ticker
+# ===21. リストが空で selected_ticker がない場合の保険 終了===========================================================
 
-# -------------------------------
-# 6) 参考：ミニ価格ボード（任意・軽量）
-# -------------------------------
+# ===22.参考：ミニ価格ボード（任意・軽量）===========================================================
 with st.expander("🪙 ミニ価格ボード（参考）", expanded=False):
     show = ticker_list[:12]  # 負荷軽減で12件まで
     data = []
@@ -446,24 +499,25 @@ with st.expander("🪙 ミニ価格ボード（参考）", expanded=False):
 
     else:
         st.caption("※ データ取得不可の銘柄は表示されません。")
-# ----------------------------
-# 📌 3. 画面を2カラムに分割
-# ----------------------------
-col1, col2 = st.columns([1, 4])
+# ===22.参考：ミニ価格ボード（任意・軽量）終了===========================================================
 
-# ----------------------------
-# 📌 4. 左：ティッカー選択ボタン（TradingView風）
-# ----------------------------
+# ===23. 画面を2カラムに分割===========================================================
+
+col1, col2 = st.columns([1, 4])
+# ===23. 画面を2カラムに分割 終了===========================================================
+
+# ===24. 左：ティッカー選択ボタン（TradingView風）===========================================================
+
 with col1:
     st.markdown("### ティッカー選択")
     for t in ticker_list:
         if st.button(t, use_container_width=True):
             st.session_state.selected_ticker = t
             ticker = t  # 即時反映
+# ===24. 左：ティッカー選択ボタン（TradingView風）終了===========================================================
 
-# ----------------------------
-# 📌 5. 右：チャートと操作パネル
-# ----------------------------
+# ===25. 右：チャートと操作パネル===========================================================
+
 with col2:
     st.markdown(f"## 選択中: `{ticker}`")
 
@@ -522,10 +576,10 @@ with col2:
             st.warning("⚠️ データが取得できませんでした。")
     except Exception as e:
         st.error(f"エラーが発生しました: {e}")
+# ===25. 右：チャートと操作パネル　終了===========================================================
 
-# ------------------------------------------
-# 📊 決算サマリー表示（チャートの下）
-# ------------------------------------------
+# ===26.📊 決算サマリー表示（チャートの下）===========================================================
+
 st.markdown("---")
 st.markdown("""
 <div class="tenet-h1"> 決算概要</div>
@@ -561,10 +615,12 @@ if False:
       </div>
     """, unsafe_allow_html=True)
 
+# ===26.📊 決算サマリー表示（チャートの下）終了============================================================================================================
 
-# ========= ⏬ 決算データ（自動換算・堅牢版） =========
+# ===27. ⏬ 決算データ（自動換算・堅牢版） =================================================================================================
+ # ===PATCH:A ===============================================
 DEBUG = True  # デバッグ時 True, 運用時 False
-
+ # ===PATCH:B ===============================================
 try:
     def safe_pct(numer, denom):
         try:
@@ -573,13 +629,14 @@ try:
         except Exception:
             pass
         return 0.0
+ # ===PATCH:C ===============================================
     
     def to_billions(v):
         try:
             return float(v) / 1e9
         except Exception:
             return 0.0
-    
+ # ===PATCH:D ===============================================    
     def get_shares_outstanding(metrics: dict, ticker: str) -> float:
         return (
             metrics.get("sharesOutstanding")
@@ -587,6 +644,7 @@ try:
             or yf.Ticker(ticker).info.get("sharesOutstanding")
             or 0.0
         )
+ # ===PATCH:E ===============================================    
     def _to_float(x):
         """カンマ付きや文字列もできるだけ float 化"""
         try:
@@ -595,7 +653,7 @@ try:
             return float(x)
         except Exception:
             return None
-    
+ # ===PATCH:F ===============================================       
     def extract_ic_number(ic):
         """
         financials_reported の report.ic から Revenue を抽出。
@@ -612,7 +670,7 @@ try:
             "Total Revenues",
             "Revenues",
         )
-    
+ # ===PATCH:G ===============================================      
         # dict のときはキー優先
         if isinstance(ic, dict):
             for k in CANDS:
@@ -646,46 +704,114 @@ try:
                         if f is not None:
                             return f
         return None
+ # ===PATCH:H ===============================================    
 except Exception as e:
     if DEBUG:
         st.error(traceback.format_exc())  # 開発中は詳細表示
     else:
-        st.warning("⚠️ 決算データの取得でエラーが発生しました。")    
-# ============ PATCH-B: 実績（Actual）は SEC から ==========================
+        st.warning("⚠️ 決算データの取得でエラーが発生しました。")   
+# ===27. ⏬ 決算データ（自動換算・堅牢版） 終了============================================================================================================
+ # ===PATCH:A ===============================================    
+def debug_sec_dump(ticker: str):
+    cik = resolve_cik(ticker)
+    print("CIK:", cik)
+
+    facts = sec_company_facts(cik)
+    f = facts.get("facts", {})
+    print("namespaces:", list(f.keys())[:5])
+
+    for ns in ("us-gaap", "ifrs-full"):
+        if ns in f:
+            print(f"[{ns}] concepts sample:", list(f[ns].keys())[:20])
+
+  # ===PATCH:B 収益・EPS 候補を実際に探す===============================================      
+    rev, mr = _first_val(facts, GAAP_REVENUE_KEYS)
+    print("Revenue:", rev, "meta:", mr)
+
+    eps, me = _first_val(facts, [GAAP_EPS_DILUTED, "ifrs-full:DilutedEarningsLossPerShare"])
+    print("EPS:", eps, "meta:", me)
+# ===28.?============================================================================================================
+ # ===PATCH:A ===============================================  
+def get_us_actuals_from_sec(ticker: str) -> dict:
+    cik   = resolve_cik(ticker)
+    facts = sec_company_facts(cik)
+
+ # ===PATCH:B revenue===============================================
+    GAAP_REVENUE_KEYS = [
+        "us-gaap:SalesRevenueNet",
+        "us-gaap:Revenues",
+        "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
+        "ifrs-full:Revenue",  # IFRS 企業向け
+    ]
+    rev, meta_r = _first_val(facts, GAAP_REVENUE_KEYS)
+
+ # ===PATCH:C EPS (Diluted) → 無ければ NetIncome / WAD Shares で再計算===============================================  
+    eps, meta_e = _first_val(facts, [GAAP_EPS_DILUTED])
+    if eps is None:
+        eps, meta_e = _try_compute_eps_diluted(facts)
+
+    if rev is None and eps is None:
+        raise RuntimeError(f"SEC XBRL facts not found for {ticker}")
+
+    meta = meta_e or meta_r or {}
+    return {
+        "eps_diluted": eps,
+        "revenue": rev,
+        "period": {
+            "fy": meta.get("fy"),
+            "fp": meta.get("fp"),
+            "filed": meta.get("filed"),
+            "form": meta.get("form"),
+            "end": meta.get("end"),
+        },
+        "source": "SEC XBRL",
+    }
+    
+# ===28.?　終了============================================================================================================
+
+# ===29.? 実績（Actual）は SEC から ==========================
+ # ===PATCH:A ===============================================  
 eps_actual = 0.0
 rev_actual_B = 0.0
-
+ # ===PATCH:B ===============================================  
 try:
     actual = get_us_actuals_from_sec(ticker)   # ← SEC
     if actual.get("eps_diluted") is not None:
         eps_actual = float(actual["eps_diluted"])
     if actual.get("revenue") is not None:
         rev_actual_B = float(actual["revenue"]) / 1e9  # 表示はB(十億USD)に
-    # 小さくソース情報をUI表示（お好みで）
+ # ===PATCH:C === ============================================ 小さくソース情報をUI表示（お好みで）
     st.caption(f"Source: {actual['source']}  {actual['period']}")
 except Exception as e:
     st.warning(f"SEC実績の取得に失敗: {e}")
-# ============ /PATCH-B =========================================================
-# === Estimates layer (EPS/Revenue; keep separate) ===
+# ===29.?　終了=========================================================
+
+# ===30. 予想　Estimates layer (EPS/Revenue; keep separate) ===============================================================
+ # ===PATCH:A ===============================================  
 eps_est_val = None         # ← UI で使う名前に合わせる
 rev_est_B   = None         # Revenue 予想（無ければ None のまま）
-
+ # ===PATCH:B ===============================================  
 try:
     earnings_list = finnhub_client.company_earnings(ticker, limit=1)
     if isinstance(earnings_list, list) and earnings_list:
         e0 = earnings_list[0]
         if e0.get("estimate") is not None:
             eps_est_val = float(e0["estimate"])
+ # ===PATCH:C ===============================================  
 except Exception as e:
     st.warning(f"EPS予想の取得に失敗: {e}")
 
 # もし Revenue 予想を別APIで入れる場合はここで rev_est_B に代入
 # 例: rev_est_B = <analyst revenue estimate in USD billions>
 
-# ============ PATCH-C: 予想は Finnhub で（混ぜない） ====================
+# ===30. Estimates layer (EPS/Revenue; keep separate) 　終了===============================================================
+
+
+# ===31. 予想は Finnhub で（混ぜない） ====================
+ # ===PATCH:A ===============================================  
 eps_est = 0.0
 rev_est_B = None  # N/A を許容
-
+ # ===PATCH:B ===============================================  
 try:
     earnings_list = finnhub_client.company_earnings(ticker, limit=1)
     if isinstance(earnings_list, list) and earnings_list:
@@ -694,37 +820,56 @@ try:
             eps_est = float(e0["estimate"])
 except Exception as e:
     st.warning(f"EPS予想の取得に失敗: {e}")
-# ============ /PATCH-C =========================================================
-# ============ PATCH-D: 差分の計算とUI =====================================
+# ====31.?終了========
+
+# ===32.差分の計算とUI =====================================
+ # ===PATCH:A ===============================================  
+block = collect_earnings_block(ticker)
+
+eps_act = block["eps_actual"]
+rev_act_usd = block["rev_actual_usd"]
+eps_est = block["eps_est"]
+rev_est_usd = block["rev_est_usd"]
+ # ===PATCH:B ===============================================  
 def safe_pct(numer, denom):
     try:
-        if denom not in (None, 0, 0.0):
+        if denom not in (None, 0, 0.0) and numer is not None:
             return round((float(numer) - float(denom)) / float(denom) * 100, 2)
     except Exception:
         pass
-    return 0.0
+    return None
+ # ===PATCH:C 同期の場合だけ差分を表示===============================================   
+eps_diff = safe_pct(eps_act, eps_est) if block["same_period_ok"] else None
+rev_diff = safe_pct(rev_act_usd, rev_est_usd) if (block["same_period_ok"] and rev_est_usd is not None) else None
+ # ===PATCH:D ===============================================  
+st.metric("EPS (Actual)", f"{eps_act:.2f}" if eps_act is not None else "N/A",
+          f"{eps_diff:+.2f}%" if eps_diff is not None else None)
 
-eps_diff_pct = safe_pct(eps_actual, eps_est) if eps_est else 0.0
-rev_diff_pct = 0.0  # 予想が無い場合は 0 / 表示N/A
-
-# 例: st.metric で
-st.metric("EPS (Actual)", f"{eps_actual:.2f}", f"{eps_diff_pct:+.2f}%")
-if rev_actual_B:
-    st.metric("Revenue (B, Actual)", f"{rev_actual_B:.2f}B",
-              f"{rev_diff_pct:+.2f}%"
-              if rev_est_B is not None else None)
+if rev_act_usd is not None:
+    st.metric("Revenue (Actual, B)", f"{rev_act_usd/1e9:.2f}B",
+              f"{rev_diff:+.2f}%" if rev_diff is not None else None)
 else:
-    st.metric("Revenue (B, Actual)", "N/A")
-# ============ /PATCH-D =========================================================
+    st.metric("Revenue (Actual, B)", "N/A")
 
-# 🎯 ターゲット価格データ（共有で使う）
+ # ===PATCH:E  ソース/警告のラベル（お好みで）=============================================== 
+if block["sources"]:
+    st.caption("Source: " + " → ".join(block["sources"]))
+for w in block["warnings"][:2]:
+    st.caption(f"⚠️ {w}")
+if not block["same_period_ok"]:
+    st.caption("⚠️ 実績と予想の参照期が一致していない可能性があります（差分は参考値）。")
+
+# ===32.差分の計算とUI 終了=====================================
+
+# ===33.🎯 ターゲット価格データ（共有で使う）===================================== 
 price_data = pd.DataFrame({
     "Label": ["Before", "After", "Analyst Target", "AI Target"],
     "Price": [181.75, 176.36, 167.24, 178.20]
 })
+# ===33.🎯 ターゲット価格データ（共有で使う）終了===================================== 
 
-# =============================
-# 🎨 ダークカードUI（画像の雰囲気に寄せる）
+# ===34. 🎨 ダークカードUI（画像の雰囲気に寄せる）=============================
+
 # 既存の指標変数(eps_actual, eps_est, rev_actual_B, next_rev_B など)をそのまま利用
 # =============================
 
