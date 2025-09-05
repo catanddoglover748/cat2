@@ -41,7 +41,6 @@ def check_password():
 check_password()
 
 # --- ③ 以降がアプリ本体（認証後のみ表示・動作） ---
-# --- ③ 以降がアプリ本体（認証後のみ表示・動作） ---
 st.title("🔒 自分専用ダッシュボード")
 
 st.markdown("""
@@ -86,6 +85,7 @@ SEC_HEADERS = {
     "Accept-Encoding": "gzip, deflate",
 }
 
+#
 _last_call_ts = {"sec": 0.0}
 
 def sec_get(url, **kw):
